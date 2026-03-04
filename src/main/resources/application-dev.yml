@@ -1,0 +1,22 @@
+# ── Dev profile: relaxed settings for local Docker Compose ──────────────────
+spring:
+  jpa:
+    properties:
+      hibernate:
+        format_sql: true
+        generate_statistics: true
+
+  flyway:
+    baseline-on-migrate: true     # allow Flyway on pre-existing dev schema
+
+logging:
+  level:
+    com.qanal: DEBUG
+    org.springframework.security: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.orm.jdbc.bind: TRACE
+
+management:
+  endpoint:
+    health:
+      show-details: always

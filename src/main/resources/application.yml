@@ -1,0 +1,115 @@
+spring:
+  application:
+    name: qanal-control-plane
+
+  threads:
+    virtual:
+      enabled: true
+
+  # ── PostgreSQL + HikariCP ──────────────────────────────────────────────────
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:qanal}
+    username: ${DB_USER:qanal}
+    password: ${DB_PASSWORD:qanal}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: qanal-cp
+      maximum-pool-size: 20          # (2 × CPU) + spindle_count ≈ 20 for 4-core + SSD
+      minimum-idle: 5
+      connection-timeout: 5000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      auto-commit: false
+
+  # ── JPA / Hibernate ───────────────────────────────────────────────────────
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 50
+          order_inserts: true
+          order_updates: true
+          batch_versioned_data: true
+        generate_statistics: false
+        format_sql: false
+
+  # ── Flyway ────────────────────────────────────────────────────────────────
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+    validate-on-migrate: true
+
+  # ── Redis (Lettuce pool) ──────────────────────────────────────────────────
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+          max-wait: 1000ms
+
+  # ── Security: disable default form login ──────────────────────────────────
+  security:
+    user:
+      name: disabled
+
+# ── Embedded server ───────────────────────────────────────────────────────────
+server:
+  port: ${SERVER_PORT:8080}
+  compression:
+    enabled: true
+    mime-types: application/json
+  tomcat:
+    threads:
+      max: 200
+
+# ── Actuator ─────────────────────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      base-path: /actuator
+      exposure:
+        include: health,prometheus,info,metrics
+  endpoint:
+    health:
+      show-details: always
+    prometheus:
+      access: unrestricted
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      region: ${AGENT_REGION:local}
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+# ── Qanal custom properties ──────────────────────────────────────────────────
+qanal:
+  grpc:
+    server:
+      port: ${GRPC_PORT:9090}
+
+  transfer:
+    default-expiry-hours: 24
+    max-file-size-bytes: 109951162777600   # 100 TB
+    min-chunk-size-bytes: 67108864          # 64  MB
+    max-chunk-size-bytes: 268435456         # 256 MB
+    max-chunks: 1024
+    min-parallel-streams: 4
+    max-parallel-streams: 32
+
+  billing:
+    quota-cache-ttl-seconds: 60
+
+  rate-limit:
+    requests-per-minute: 100
