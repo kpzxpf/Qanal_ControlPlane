@@ -7,9 +7,9 @@ plugins {
     id("com.google.protobuf") version "0.9.4"
 }
 
-group = "com.volzhin"
-version = "0.0.1-SNAPSHOT"
-description = "ControlPlane"
+group = "com.qanal"
+version = "0.1.0-SNAPSHOT"
+description = "Qanal Control Plane — transfer orchestration & management API"
 
 java {
     toolchain {
@@ -21,55 +21,70 @@ repositories {
     mavenCentral()
 }
 
-val grpcVersion = "1.68.1"
-val protobufVersion = "4.28.3"
+val grpcVersion       = "1.68.1"
+val protobufVersion   = "3.25.5"
+val mapstructVersion  = "1.6.3"
+val lombokVersion     = "1.18.36"
 
 dependencies {
-    // REST API (virtual threads: spring.threads.virtual.enabled=true in application.properties)
+    // ── Web / Virtual Threads ──────────────────────────────────────────────
     implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation("org.springframework.boot:spring-boot-starter-validation")
+    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
 
-    // PostgreSQL via Hibernate
+    // ── Persistence ───────────────────────────────────────────────────────
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     runtimeOnly("org.postgresql:postgresql")
-
-    // Flyway migrations
     implementation("org.flywaydb:flyway-core")
     runtimeOnly("org.flywaydb:flyway-database-postgresql")
 
-    // Redis — transfer progress
+    // ── Redis (progress cache, rate limiting, quota cache) ────────────────
     implementation("org.springframework.boot:spring-boot-starter-data-redis")
 
-    // API key authentication
+    // ── Security ──────────────────────────────────────────────────────────
     implementation("org.springframework.boot:spring-boot-starter-security")
 
-    // gRPC server for Data Plane
-    implementation("io.grpc:grpc-netty-shaded:${grpcVersion}")
-    implementation("io.grpc:grpc-protobuf:${grpcVersion}")
-    implementation("io.grpc:grpc-stub:${grpcVersion}")
+    // ── gRPC server (receives reports from Data Plane) ────────────────────
+    implementation("io.grpc:grpc-netty-shaded:$grpcVersion")
+    implementation("io.grpc:grpc-protobuf:$grpcVersion")
+    implementation("io.grpc:grpc-stub:$grpcVersion")
     compileOnly("javax.annotation:javax.annotation-api:1.3.2")
 
-    // Metrics (requires spring-boot-starter-actuator to expose /actuator/prometheus)
-    implementation("io.micrometer:micrometer-registry-prometheus")
+    // ── Metrics ───────────────────────────────────────────────────────────
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("io.micrometer:micrometer-registry-prometheus")
 
-    // xxHash64 checksums
+    // ── xxHash64 checksums ────────────────────────────────────────────────
     implementation("net.openhft:zero-allocation-hashing:0.16")
 
-    // Tests
+    // ── Code generation ───────────────────────────────────────────────────
+    compileOnly("org.projectlombok:lombok:$lombokVersion")
+    annotationProcessor("org.projectlombok:lombok:$lombokVersion")
+    implementation("org.mapstruct:mapstruct:$mapstructVersion")
+    annotationProcessor("org.mapstruct:mapstruct-processor:$mapstructVersion")
+    // Lombok + MapStruct ordering fix
+    annotationProcessor("org.projectlombok:lombok-mapstruct-binding:0.2.0")
+
+    // ── Retry ─────────────────────────────────────────────────────────────
+    implementation("org.springframework.retry:spring-retry")
+
+    // ── Tests ─────────────────────────────────────────────────────────────
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.springframework.security:spring-security-test")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.testcontainers:postgresql")
-    testImplementation("org.testcontainers:redis")
+    testImplementation("org.testcontainers:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
+// ── Protobuf / gRPC code generation ──────────────────────────────────────────
 protobuf {
     protoc {
-        artifact = "com.google.protobuf:protoc:${protobufVersion}"
+        artifact = "com.google.protobuf:protoc:$protobufVersion"
     }
     plugins {
         id("grpc") {
-            artifact = "io.grpc:protoc-gen-grpc-java:${grpcVersion}"
+            artifact = "io.grpc:protoc-gen-grpc-java:$grpcVersion"
         }
     }
     generateProtoTasks {
@@ -81,6 +96,27 @@ protobuf {
     }
 }
 
+sourceSets {
+    main {
+        java {
+            srcDirs(
+                "build/generated/source/proto/main/java",
+                "build/generated/source/proto/main/grpc"
+            )
+        }
+    }
+}
+
+// ── Explicit main class (prevents Spring Boot plugin from guessing) ───────────
+springBoot {
+    mainClass.set("com.qanal.control.QanalControlPlaneApplication")
+}
+
 tasks.withType<Test> {
     useJUnitPlatform()
+}
+
+// Ensure proto code is generated before compilation
+tasks.named("compileJava") {
+    dependsOn("generateProto")
 }
