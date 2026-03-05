@@ -74,7 +74,18 @@ public class RedisProgressAdapter implements ProgressBus {
         var container = new RedisMessageListenerContainer();
         container.setConnectionFactory(connectionFactory);
         container.afterPropertiesSet();
-        container.start();
+
+        // BUG-8 Fix: start() is attempted before registering callbacks.
+        // If it throws, we complete the emitter with an error and return immediately
+        // without entering the finally block — container was never started so
+        // there is nothing to stop, preventing a resource leak.
+        try {
+            container.start();
+        } catch (Exception e) {
+            log.error("Failed to start Redis listener container for transfer {}", transferId, e);
+            emitter.completeWithError(e);
+            return;
+        }
 
         CompletableFuture<Void> done = new CompletableFuture<>();
         emitter.onCompletion(() -> done.complete(null));

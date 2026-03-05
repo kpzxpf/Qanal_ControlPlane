@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -71,11 +72,14 @@ public class TransferGrpcAdapter extends TransferReportServiceGrpc.TransferRepor
     public void reportTransferFinalized(TransferFinalizedRequest request,
                                          StreamObserver<TransferFinalizedResponse> responseObserver) {
         try {
-            boolean verified = finalizeUseCase.finalize(
+            var result = finalizeUseCase.finalize(
                     request.getTransferId(), request.getFinalChecksum());
             responseObserver.onNext(TransferFinalizedResponse.newBuilder()
-                    .setVerified(verified)
-                    .setStatus(verified ? "COMPLETED" : "FAILED")
+                    .setVerified(result.verified())
+                    .setStatus(result.verified() ? "COMPLETED" : "FAILED")
+                    .setEgressHost(result.egressHost() != null ? result.egressHost() : "")
+                    .setEgressPort(result.egressPort())
+                    .setEgressDownloadPort(result.egressDownloadPort())
                     .build());
         } catch (Exception e) {
             log.error("Error finalizing transfer {}", request.getTransferId(), e);
@@ -87,28 +91,43 @@ public class TransferGrpcAdapter extends TransferReportServiceGrpc.TransferRepor
 
     @Override
     public StreamObserver<ProgressUpdate> streamProgress(StreamObserver<ProgressAck> responseObserver) {
+        // BUG-6 Fix: cache the DB transfer state and refresh at most every 2 seconds.
+        // The old code queried the DB on every progress message (up to 10/sec per transfer),
+        // causing unnecessary load at scale.
         AtomicReference<TransferStatus> cachedStatus  = new AtomicReference<>(TransferStatus.IN_PROGRESS);
-        AtomicReference<String>         lastTransferId = new AtomicReference<>("");
+        AtomicLong                      cachedFileSize = new AtomicLong(0L);
+        AtomicLong                      lastFetchMs    = new AtomicLong(0L);
 
         return new StreamObserver<>() {
             @Override
             public void onNext(ProgressUpdate update) {
                 String transferId = update.getTransferId();
 
-                // Read current status (by primary key — cheap)
-                TransferStatus currentStatus = transferStore.findById(transferId)
-                        .map(com.qanal.control.domain.model.Transfer::getStatus)
-                        .orElse(TransferStatus.IN_PROGRESS);
+                // Refresh from DB at most once every 2 seconds per stream
+                long now = System.currentTimeMillis();
+                if (now - lastFetchMs.get() > 2_000) {
+                    transferStore.findById(transferId).ifPresent(t -> {
+                        cachedStatus.set(t.getStatus());
+                        cachedFileSize.set(t.getFileSize());
+                    });
+                    lastFetchMs.set(now);
+                }
 
-                lastTransferId.set(transferId);
-                cachedStatus.set(currentStatus);
+                TransferStatus currentStatus = cachedStatus.get();
+                long           fileSize      = cachedFileSize.get();
+
+                // BUG-7 Fix: compute real-time progressPercent from DataPlane bytes,
+                // and pass the actual fileSize. Both were previously hardcoded to 0.
+                int progressPercent = fileSize > 0
+                        ? (int) Math.min(100, (100L * update.getBytesTransferred() / fileSize))
+                        : 0;
 
                 progressBus.publish(new TransferProgressResponse(
                         transferId,
                         currentStatus,
                         update.getBytesTransferred(),
-                        0L,
-                        0,
+                        fileSize,
+                        progressPercent,
                         update.getCurrentThroughputBps(),
                         update.getActiveStreams(),
                         update.getPacketLossRate(),

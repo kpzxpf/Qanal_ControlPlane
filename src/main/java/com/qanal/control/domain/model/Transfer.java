@@ -64,6 +64,15 @@ public class Transfer {
     @JoinColumn(name = "assigned_relay_id")
     private RelayNode assignedRelay;
 
+    /** Egress relay — where the recipient downloads from. Null if same as ingress. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "egress_relay_id")
+    private RelayNode egressRelay;
+
+    /** QUIC port on the egress DataPlane dedicated to recipient downloads. */
+    @Column(name = "egress_download_port")
+    private Integer egressDownloadPort;
+
     @Column(nullable = false)
     private long bytesTransferred = 0;
 
@@ -105,7 +114,9 @@ public class Transfer {
 
     public int progressPercent() {
         if (totalChunks == 0) return 0;
-        return (int) (100L * completedChunks / totalChunks);
+        // BUG-9 Fix: use ceiling division so progress reaches 100% exactly when
+        // the last chunk is counted, avoiding a stuck-at-99% display.
+        return (int) Math.min(100, (100L * completedChunks + totalChunks - 1) / totalChunks);
     }
 
     public boolean isComplete() {

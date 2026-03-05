@@ -113,3 +113,13 @@ qanal:
 
   rate-limit:
     requests-per-minute: 100
+
+  admin:
+    secret: ${QANAL_ADMIN_SECRET:change-me-in-production}
+
+  stripe:
+    secret-key:      ${STRIPE_SECRET_KEY:sk_test_placeholder}
+    webhook-secret:  ${STRIPE_WEBHOOK_SECRET:whsec_placeholder}
+    pro-price-id:    ${STRIPE_PRO_PRICE_ID:price_placeholder}
+    success-url:     ${STRIPE_SUCCESS_URL:https://qanal.io/billing/success}
+    cancel-url:      ${STRIPE_CANCEL_URL:https://qanal.io/billing/cancel}

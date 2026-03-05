@@ -1,8 +1,10 @@
 package com.qanal.control.billing.service;
 
-import com.qanal.control.auth.model.Organization;
-import com.qanal.control.billing.repository.UsageRecordRepository;
-import com.qanal.control.config.QanalProperties;
+import com.qanal.control.adapter.out.cache.RedisQuotaAdapter;
+import com.qanal.control.application.port.out.UsageStore;
+import com.qanal.control.domain.exception.QuotaExceededException;
+import com.qanal.control.domain.model.Organization;
+import com.qanal.control.infrastructure.config.QanalProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -17,30 +19,33 @@ import static org.mockito.Mockito.*;
 
 class QuotaEnforcerTest {
 
-    private UsageRecordRepository repo;
-    private StringRedisTemplate   redis;
+    private UsageStore                      usageStore;
+    private StringRedisTemplate             redis;
     private ValueOperations<String, String> valueOps;
-    private QuotaEnforcerImpl     enforcer;
+    private RedisQuotaAdapter               enforcer;
 
-    private static final long FREE_LIMIT       = 100L  * 1024 * 1024 * 1024;  // 100 GB
-    private static final long PRO_LIMIT        = 10L   * 1024 * 1024 * 1024 * 1024; // 10 TB
+    private static final long FREE_LIMIT = 100L  * 1024 * 1024 * 1024;       // 100 GB
+    private static final long PRO_LIMIT  = 10L   * 1024 * 1024 * 1024 * 1024; // 10 TB
 
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() {
-        repo      = mock(UsageRecordRepository.class);
-        redis     = mock(StringRedisTemplate.class);
-        valueOps  = mock(ValueOperations.class);
+        usageStore = mock(UsageStore.class);
+        redis      = mock(StringRedisTemplate.class);
+        valueOps   = mock(ValueOperations.class);
         when(redis.opsForValue()).thenReturn(valueOps);
 
         var props = new QanalProperties(
                 new QanalProperties.GrpcServerProps(new QanalProperties.GrpcServerProps.ServerProps(9090)),
                 new QanalProperties.TransferProps(24, 100L * 1024 * 1024 * 1024,
-                        1024 * 1024, 512L * 1024 * 1024, 1000, 4, 64),
+                        64L * 1024 * 1024, 256L * 1024 * 1024, 1024, 4, 32),
                 new QanalProperties.BillingProps(60),
-                new QanalProperties.RateLimitProps(1000)
+                new QanalProperties.RateLimitProps(100),
+                new QanalProperties.StripeProps("sk_test_x", "whsec_x", "price_x",
+                        "https://qanal.io/success", "https://qanal.io/cancel"),
+                new QanalProperties.AdminProps("test-secret")
         );
-        enforcer = new QuotaEnforcerImpl(repo, redis, props);
+        enforcer = new RedisQuotaAdapter(usageStore, redis, props);
     }
 
     private Organization orgWithPlan(Organization.Plan plan) {
@@ -56,7 +61,7 @@ class QuotaEnforcerTest {
     @Test
     void free_withinQuota_passes() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(repo.sumBytesForPeriod(anyString(), any(OffsetDateTime.class), any(OffsetDateTime.class)))
+        when(usageStore.sumBytesForPeriod(anyString(), any(OffsetDateTime.class), any(OffsetDateTime.class)))
                 .thenReturn(10L * 1024 * 1024 * 1024); // 10 GB used
 
         assertThatCode(() -> enforcer.assertQuotaAvailable(
@@ -68,7 +73,7 @@ class QuotaEnforcerTest {
     @Test
     void free_exceedsQuota_throwsQuotaExceeded() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(repo.sumBytesForPeriod(anyString(), any(OffsetDateTime.class), any(OffsetDateTime.class)))
+        when(usageStore.sumBytesForPeriod(anyString(), any(OffsetDateTime.class), any(OffsetDateTime.class)))
                 .thenReturn(98L * 1024 * 1024 * 1024); // 98 GB already used
 
         assertThatThrownBy(() -> enforcer.assertQuotaAvailable(
@@ -83,7 +88,7 @@ class QuotaEnforcerTest {
     @Test
     void pro_withinQuota_passes() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(repo.sumBytesForPeriod(anyString(), any(OffsetDateTime.class), any(OffsetDateTime.class)))
+        when(usageStore.sumBytesForPeriod(anyString(), any(OffsetDateTime.class), any(OffsetDateTime.class)))
                 .thenReturn(1L * 1024 * 1024 * 1024 * 1024); // 1 TB used
 
         assertThatCode(() -> enforcer.assertQuotaAvailable(
@@ -101,7 +106,7 @@ class QuotaEnforcerTest {
                 Long.MAX_VALUE / 2))
             .doesNotThrowAnyException();
 
-        verifyNoInteractions(repo, valueOps);
+        verifyNoInteractions(usageStore, valueOps);
     }
 
     // ── Redis cache ───────────────────────────────────────────────────────────
@@ -116,7 +121,7 @@ class QuotaEnforcerTest {
                 1L * 1024 * 1024 * 1024))  // 1 GB
             .doesNotThrowAnyException();
 
-        verifyNoInteractions(repo);
+        verifyNoInteractions(usageStore);
     }
 
     @Test
@@ -129,6 +134,6 @@ class QuotaEnforcerTest {
                 2L * 1024 * 1024 * 1024))  // 2 GB → total 101 GB > limit
             .isInstanceOf(QuotaExceededException.class);
 
-        verifyNoInteractions(repo);
+        verifyNoInteractions(usageStore);
     }
 }

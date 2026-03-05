@@ -38,6 +38,10 @@ public class SecurityConfig {
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/**").permitAll()
+                        // Stripe webhook: auth handled by signature verification in BillingController
+                        .requestMatchers("/api/v1/billing/webhook").permitAll()
+                        // Admin: auth handled by X-Admin-Secret header in AdminController
+                        .requestMatchers("/api/v1/admin/**").permitAll()
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().denyAll()
                 )

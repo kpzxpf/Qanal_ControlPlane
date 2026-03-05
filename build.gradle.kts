@@ -65,6 +65,9 @@ dependencies {
     // Lombok + MapStruct ordering fix
     annotationProcessor("org.projectlombok:lombok-mapstruct-binding:0.2.0")
 
+    // ── Stripe billing ────────────────────────────────────────────────────
+    implementation("com.stripe:stripe-java:26.3.0")
+
     // ── Retry ─────────────────────────────────────────────────────────────
     implementation("org.springframework.retry:spring-retry")
 

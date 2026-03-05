@@ -55,7 +55,7 @@ public class FinalizeTransferUseCaseImpl implements FinalizeTransferUseCase {
 
     @Override
     @Transactional
-    public boolean finalize(String transferId, String finalChecksum) {
+    public FinalizeResult finalize(String transferId, String finalChecksum) {
         var transfer = transferStore.findById(transferId)
                 .orElseThrow(() -> new TransferNotFoundException(transferId));
 
@@ -65,7 +65,6 @@ public class FinalizeTransferUseCaseImpl implements FinalizeTransferUseCase {
         if (verified) {
             transfer.setStatus(stateMachine.transition(transfer.getStatus(), TransferStatus.COMPLETED));
             transfer.setCompletedAt(OffsetDateTime.now());
-            // Set completedChunks to totalChunks exactly once here (single DB update)
             transfer.setCompletedChunks(transfer.getTotalChunks());
             freeRelayCapacity(transfer);
             completedCounter.increment();
@@ -84,8 +83,6 @@ public class FinalizeTransferUseCaseImpl implements FinalizeTransferUseCase {
         }
 
         transferStore.save(transfer);
-
-        // Clean up Redis counter
         chunkCounter.delete(transferId);
 
         // Publish terminal progress event to close all SSE streams
@@ -101,7 +98,17 @@ public class FinalizeTransferUseCaseImpl implements FinalizeTransferUseCase {
                 System.currentTimeMillis()
         ));
 
-        return verified;
+        // Return egress relay info so the ingress DataPlane knows where to forward.
+        // egressRelay is null if ingress == egress (same DataPlane handles both roles).
+        var egress = transfer.getEgressRelay();
+        if (verified && egress != null && !egress.getId().equals(
+                transfer.getAssignedRelay() != null ? transfer.getAssignedRelay().getId() : "")) {
+            return new FinalizeResult(true,
+                    egress.getHost(),
+                    egress.getQuicPort(),
+                    transfer.getEgressDownloadPort() != null ? transfer.getEgressDownloadPort() : 0);
+        }
+        return new FinalizeResult(verified, "", 0, 0);
     }
 
     private void freeRelayCapacity(com.qanal.control.domain.model.Transfer t) {

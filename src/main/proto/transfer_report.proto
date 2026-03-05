@@ -56,8 +56,13 @@ message TransferFinalizedRequest {
 }
 
 message TransferFinalizedResponse {
-    bool   verified = 1;
-    string status   = 2;             // COMPLETED | FAILED
+    bool   verified             = 1;
+    string status               = 2;          // COMPLETED | FAILED
+    // If egress_host is non-empty, the ingress DataPlane must forward the
+    // assembled file to this egress DataPlane before the transfer is complete.
+    string egress_host          = 3;
+    int32  egress_port          = 4;
+    int32  egress_download_port = 5;
 }
 
 // ── Progress streaming ────────────────────────────────────────────────────

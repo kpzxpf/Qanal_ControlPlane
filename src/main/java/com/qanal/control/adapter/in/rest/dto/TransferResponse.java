@@ -21,8 +21,12 @@ public record TransferResponse(
         int            progressPercent,
         long           bytesTransferred,
         Double         avgThroughputBps,
+        // Ingress relay — where the sender uploads to
         String         relayHost,
         int            relayQuicPort,
+        // Egress relay — where the recipient downloads from (null = same as ingress)
+        String         egressRelayHost,
+        Integer        egressDownloadPort,
         OffsetDateTime createdAt,
         OffsetDateTime expiresAt,
         OffsetDateTime completedAt,

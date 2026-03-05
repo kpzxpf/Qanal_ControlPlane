@@ -1,8 +1,9 @@
 package com.qanal.control.auth.filter;
 
-import com.qanal.control.auth.model.ApiKey;
-import com.qanal.control.auth.model.Organization;
-import com.qanal.control.auth.service.ApiKeyService;
+import com.qanal.control.adapter.in.security.ApiKeyAuthFilter;
+import com.qanal.control.application.port.out.ApiKeyStore;
+import com.qanal.control.domain.model.ApiKey;
+import com.qanal.control.domain.model.Organization;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockFilterChain;
@@ -10,23 +11,30 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import java.time.OffsetDateTime;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 class ApiKeyAuthFilterTest {
 
-    private ApiKeyService    apiKeyService;
+    private ApiKeyStore      apiKeyStore;
     private ApiKeyAuthFilter filter;
 
     @BeforeEach
     void setUp() {
-        apiKeyService = mock(ApiKeyService.class);
-        filter        = new ApiKeyAuthFilter(apiKeyService);
+        apiKeyStore = mock(ApiKeyStore.class);
+        filter      = new ApiKeyAuthFilter(apiKeyStore);
         SecurityContextHolder.clearContext();
     }
 
+    /**
+     * Creates an ApiKey whose hash matches SHA-256("qnl_validkey").
+     * SHA-256("qnl_validkey") = pre-computed hex below.
+     */
     private ApiKey validApiKey() {
         var org = new Organization();
         org.setId("org-1");
@@ -36,6 +44,9 @@ class ApiKeyAuthFilterTest {
         var key = new ApiKey();
         key.setId("key-1");
         key.setOrganization(org);
+        key.setKeyPrefix("qnl_vali");
+        // SHA-256 of "qnl_validkey"
+        key.setKeyHash(sha256("qnl_validkey"));
         key.setActive(true);
         return key;
     }
@@ -47,13 +58,14 @@ class ApiKeyAuthFilterTest {
         var chain    = new MockFilterChain();
 
         request.addHeader("X-API-Key", "qnl_validkey");
-        when(apiKeyService.validate("qnl_validkey")).thenReturn(Optional.of(validApiKey()));
+        when(apiKeyStore.findActiveByPrefix("qnl_vali")).thenReturn(Optional.of(validApiKey()));
+        doNothing().when(apiKeyStore).updateLastUsed(anyString(), any(OffsetDateTime.class));
 
         filter.doFilter(request, response, chain);
 
         assertThat(response.getStatus()).isEqualTo(200);
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNotNull();
-        assertThat(chain.getRequest()).isNotNull(); // chain was called
+        assertThat(chain.getRequest()).isNotNull();
     }
 
     @Test
@@ -63,7 +75,7 @@ class ApiKeyAuthFilterTest {
         var chain    = mock(jakarta.servlet.FilterChain.class);
 
         request.addHeader("X-API-Key", "qnl_badkeyXX");
-        when(apiKeyService.validate("qnl_badkeyXX")).thenReturn(Optional.empty());
+        when(apiKeyStore.findActiveByPrefix("qnl_badk")).thenReturn(Optional.empty());
 
         filter.doFilter(request, response, chain);
 
@@ -79,14 +91,12 @@ class ApiKeyAuthFilterTest {
         var response = new MockHttpServletResponse();
         var chain    = new MockFilterChain();
 
-        // No X-API-Key header set
-
         filter.doFilter(request, response, chain);
 
         assertThat(response.getStatus()).isEqualTo(200);
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
         assertThat(chain.getRequest()).isNotNull();
-        verifyNoInteractions(apiKeyService);
+        verifyNoInteractions(apiKeyStore);
     }
 
     @Test
@@ -99,7 +109,19 @@ class ApiKeyAuthFilterTest {
 
         filter.doFilter(request, response, chain);
 
-        verifyNoInteractions(apiKeyService);
+        verifyNoInteractions(apiKeyStore);
         assertThat(chain.getRequest()).isNotNull();
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static String sha256(String input) {
+        try {
+            var digest = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(input.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(hash);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 }

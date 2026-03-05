@@ -81,13 +81,21 @@ public class ReportChunkCompletedUseCaseImpl implements ReportChunkCompletedUseC
                 transfer.setStatus(TransferStatus.IN_PROGRESS);
                 transfer.setStartedAt(OffsetDateTime.now());
             }
-            transfer.setBytesTransferred(transfer.getBytesTransferred() + bytes);
+
+            // BUG-3 Fix: bytesTransferred = fileSize (all chunks received → full file transferred).
+            // The old code only added the last chunk's bytes, leaving bytesTransferred near-zero.
+            transfer.setBytesTransferred(transfer.getFileSize());
+
+            // BUG-3 Fix: completedChunks was never set, so progressPercent() always returned 0.
+            transfer.setCompletedChunks(transfer.getTotalChunks());
+
             updateThroughput(transfer, throughputBps);
 
             transfer.setStatus(stateMachine.transition(transfer.getStatus(), TransferStatus.COMPLETING));
             transferStore.save(transfer);
 
-            log.info("Transfer {} all chunks received — transitioning to COMPLETING", transferId);
+            log.info("Transfer {} all {} chunks received — transitioning to COMPLETING",
+                    transferId, transfer.getTotalChunks());
         }
 
         // 5 — Record usage asynchronously (REQUIRES_NEW — doesn't block main path)

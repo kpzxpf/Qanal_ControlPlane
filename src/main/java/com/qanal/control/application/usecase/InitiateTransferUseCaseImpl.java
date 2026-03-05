@@ -61,10 +61,22 @@ public class InitiateTransferUseCaseImpl implements InitiateTransferUseCase {
         // 2 — Quota check (fast path: Redis-cached)
         quotaPort.assertQuotaAvailable(org, req.fileSize());
 
-        // 3 — Route selection
-        RelayNode relay = routeSelector
+        // 3 — Route selection: ingress (near sender) and egress (near receiver)
+        RelayNode ingressRelay = routeSelector
                 .select(req.sourceRegion(), req.targetRegion(), req.fileSize())
                 .orElseThrow(() -> new IllegalStateException("No healthy relay node available"));
+
+        // Pick egress relay in the target region. Falls back to ingress if none found.
+        RelayNode egressRelay = routeSelector
+                .select(req.targetRegion(), req.targetRegion(), 0)
+                .filter(n -> !n.getId().equals(ingressRelay.getId()))
+                .orElse(ingressRelay);
+
+        // Download port convention: QUIC port + 1 (e.g. 4433 → 4434)
+        int egressDownloadPort = egressRelay.getQuicPort() + 1;
+
+        // Keep using local variable name for backwards compat below
+        RelayNode relay = ingressRelay;
 
         // 4 — Build transfer aggregate
         var transfer = new Transfer();
@@ -74,7 +86,9 @@ public class InitiateTransferUseCaseImpl implements InitiateTransferUseCase {
         transfer.setFileChecksum(req.fileChecksum());
         transfer.setSourceRegion(req.sourceRegion());
         transfer.setTargetRegion(req.targetRegion());
-        transfer.setAssignedRelay(relay);
+        transfer.setAssignedRelay(ingressRelay);
+        transfer.setEgressRelay(egressRelay);
+        transfer.setEgressDownloadPort(egressDownloadPort);
         transfer.setStatus(TransferStatus.INITIATED);
         transfer.setExpiresAt(OffsetDateTime.now()
                 .plusHours(props.transfer().defaultExpiryHours()));
@@ -99,12 +113,17 @@ public class InitiateTransferUseCaseImpl implements InitiateTransferUseCase {
     }
 
     private TransferResponse toResponse(Transfer t, List<TransferChunk> chunks) {
-        var relay = t.getAssignedRelay();
+        var ingress = t.getAssignedRelay();
+        var egress  = t.getEgressRelay();
         List<TransferResponse.ChunkDto> chunkDtos = chunks == null ? null :
                 chunks.stream()
                         .map(c -> new TransferResponse.ChunkDto(
                                 c.getChunkIndex(), c.getOffsetBytes(), c.getSizeBytes()))
                         .toList();
+
+        // Expose egress host only if it's a different node from ingress
+        String egressHost = egress != null && !egress.getId().equals(
+                ingress != null ? ingress.getId() : "") ? egress.getHost() : null;
 
         return new TransferResponse(
                 t.getId(),
@@ -116,8 +135,10 @@ public class InitiateTransferUseCaseImpl implements InitiateTransferUseCase {
                 t.progressPercent(),
                 t.getBytesTransferred(),
                 t.getAvgThroughput(),
-                relay != null ? relay.getHost() : null,
-                relay != null ? relay.getQuicPort() : 0,
+                ingress != null ? ingress.getHost() : null,
+                ingress != null ? ingress.getQuicPort() : 0,
+                egressHost,
+                t.getEgressDownloadPort(),
                 t.getCreatedAt(),
                 t.getExpiresAt(),
                 t.getCompletedAt(),

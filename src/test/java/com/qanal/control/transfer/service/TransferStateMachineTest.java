@@ -1,6 +1,8 @@
 package com.qanal.control.transfer.service;
 
-import com.qanal.control.transfer.model.TransferStatus;
+import com.qanal.control.domain.exception.InvalidTransferStateException;
+import com.qanal.control.domain.model.TransferStatus;
+import com.qanal.control.domain.service.TransferStateMachine;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -65,7 +67,7 @@ class TransferStateMachineTest {
     })
     void invalidTransition_throwsIllegalState(TransferStatus from, TransferStatus to) {
         assertThatThrownBy(() -> machine.transition(from, to))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(InvalidTransferStateException.class)
                 .hasMessageContaining("Invalid transition");
     }
 

@@ -1,8 +1,8 @@
 package com.qanal.control.transfer.service;
 
-import com.qanal.control.config.QanalProperties;
-import com.qanal.control.transfer.model.Transfer;
-import com.qanal.control.transfer.model.TransferChunk;
+import com.qanal.control.domain.model.Transfer;
+import com.qanal.control.domain.model.TransferChunk;
+import com.qanal.control.domain.service.AdaptiveChunkPlanner;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -12,31 +12,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class AdaptiveChunkPlannerTest {
 
-    // Props: min=1MB, max=512MB, maxChunks=1000
-    private static final long MIN_CHUNK   = 1L  * 1024 * 1024;
-    private static final long MAX_CHUNK   = 512L * 1024 * 1024;
-    private static final int  MAX_CHUNKS  = 1_000;
+    private static final long MIN_CHUNK  = 64L  * 1024 * 1024;  // 64  MB
+    private static final long MAX_CHUNK  = 256L * 1024 * 1024;  // 256 MB
+    private static final long MAX_CHUNKS = 1_024;
 
     private AdaptiveChunkPlanner planner;
 
     @BeforeEach
     void setUp() {
-        var transferProps = new QanalProperties.TransferProps(
-                24,          // defaultExpiryHours
-                100L * 1024 * 1024 * 1024,  // maxFileSizeBytes 100GB
-                MIN_CHUNK,
-                MAX_CHUNK,
-                MAX_CHUNKS,
-                4,           // minParallelStreams
-                64           // maxParallelStreams
-        );
-        var props = new QanalProperties(
-                new QanalProperties.GrpcServerProps(new QanalProperties.GrpcServerProps.ServerProps(9090)),
-                transferProps,
-                new QanalProperties.BillingProps(60),
-                new QanalProperties.RateLimitProps(1000)
-        );
-        planner = new AdaptiveChunkPlanner(props);
+        planner = new AdaptiveChunkPlanner(MIN_CHUNK, MAX_CHUNK, MAX_CHUNKS);
     }
 
     private Transfer transferOf(long fileSize) {
@@ -116,6 +100,6 @@ class AdaptiveChunkPlannerTest {
         // 1 Mbps, 10ms RTT → tiny BDP → many chunks → must be capped
         List<TransferChunk> chunks = planner.plan(t, 1_000_000L, 10);
 
-        assertThat(chunks.size()).isLessThanOrEqualTo(MAX_CHUNKS);
+        assertThat(chunks.size()).isLessThanOrEqualTo((int) MAX_CHUNKS);
     }
 }

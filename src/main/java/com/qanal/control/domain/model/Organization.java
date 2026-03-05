@@ -24,6 +24,10 @@ public class Organization {
     @Enumerated(EnumType.STRING)
     private Plan plan = Plan.FREE;
 
+    /** Stripe customer ID (cus_xxx). Set when the org first starts a Stripe checkout. */
+    @Column(length = 64)
+    private String stripeCustomerId;
+
     @Column(nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 

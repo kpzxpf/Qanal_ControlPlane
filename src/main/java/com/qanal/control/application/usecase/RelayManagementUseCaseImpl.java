@@ -27,10 +27,15 @@ public class RelayManagementUseCaseImpl implements RegisterAgentUseCase, Heartbe
     @Transactional
     public RelayNode register(String host, int quicPort, String region,
                                long availableBandwidthBps, Double avgRttMs) {
+        // BUG-10 Fix: availableBandwidthBps is in bits/sec; capacityBytes must be in bytes
+        // so that availableBytes() = capacityBytes - usedBytes is a valid comparison.
+        // Dividing by 8 converts to bytes/sec (throughput capacity proxy).
+        long capacityBytes = availableBandwidthBps / 8;
+
         return relayStore.findByHostAndPort(host, quicPort)
                 .map(existing -> {
                     existing.setRegion(region);
-                    existing.setCapacityBytes(availableBandwidthBps);
+                    existing.setCapacityBytes(capacityBytes);
                     existing.setAvgRttMs(avgRttMs);
                     existing.setStatus(RelayStatus.HEALTHY);
                     existing.setLastHeartbeat(OffsetDateTime.now());
@@ -41,7 +46,7 @@ public class RelayManagementUseCaseImpl implements RegisterAgentUseCase, Heartbe
                     node.setHost(host);
                     node.setQuicPort(quicPort);
                     node.setRegion(region);
-                    node.setCapacityBytes(availableBandwidthBps);
+                    node.setCapacityBytes(capacityBytes);
                     node.setAvgRttMs(avgRttMs);
                     node.setLastHeartbeat(OffsetDateTime.now());
                     log.info("Registered new relay node {}:{} in region {}", host, quicPort, region);
